@@ -2,21 +2,26 @@
 
 <!-- BEGIN STRIP_FOR_RELEASE -->
 
-<img src="http://kubernetes.io/img/warning.png" alt="WARNING"
+<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
      width="25" height="25">
-<img src="http://kubernetes.io/img/warning.png" alt="WARNING"
+<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
      width="25" height="25">
-<img src="http://kubernetes.io/img/warning.png" alt="WARNING"
+<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
      width="25" height="25">
-<img src="http://kubernetes.io/img/warning.png" alt="WARNING"
+<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
      width="25" height="25">
-<img src="http://kubernetes.io/img/warning.png" alt="WARNING"
+<img src="http://kubernetes.io/kubernetes/img/warning.png" alt="WARNING"
      width="25" height="25">
 
 <h2>PLEASE NOTE: This document applies to the HEAD of the source tree</h2>
 
 If you are using a released version of Kubernetes, you should
 refer to the docs that go with that version.
+
+<!-- TAG RELEASE_LINK, added by the munger automatically -->
+<strong>
+The latest release of this document can be found
+[here](http://releases.k8s.io/release-1.3/docs/proposals/kubelet-eviction.md).
 
 Documentation for other releases can be found at
 [releases.k8s.io](http://releases.k8s.io).
@@ -70,7 +75,9 @@ The `kubelet` will support the ability to trigger eviction decisions on the foll
 |------------------|---------------------------------------------------------------------------------|
 | memory.available | memory.available := node.status.capacity[memory] - node.stats.memory.workingSet |
 | nodefs.available   | nodefs.available := node.stats.fs.available |
+| nodefs.inodesFree | nodefs.inodesFree := node.fs.inodesFree |
 | imagefs.available | imagefs.available := node.stats.runtime.imagefs.available |
+| imagefs.inodesFree | imagefs.inodesFree := node.runtime.imageFs.inodesFree |
 
 `kubelet` supports only two filesystem partitions.
 
@@ -92,7 +99,7 @@ An eviction threshold is of the following form:
 * valid `operator` tokens are `<`
 * valid `quantity` tokens must match the quantity representation used by Kubernetes
 
-If threhold criteria are met, the `kubelet` will take pro-active action to attempt
+If threshold criteria are met, the `kubelet` will take pro-active action to attempt
 to reclaim the starved compute resource associated with the eviction signal.
 
 The `kubelet` will support soft and hard eviction thresholds.
@@ -161,7 +168,7 @@ The following node conditions are defined that correspond to the specified evict
 | Node Condition | Eviction Signal  | Description                                                      |
 |----------------|------------------|------------------------------------------------------------------|
 | MemoryPressure | memory.available | Available memory on the node has satisfied an eviction threshold |
-| DiskPressure | nodefs.available (or) imagefs.available | Available disk space on either the node's root filesytem or image filesystem has satisfied an eviction threshold |
+| DiskPressure | nodefs.available, nodefs.inodesFree, imagefs.available, or imagefs.inodesFree | Available disk space and inodes on either the node's root filesytem or image filesystem has satisfied an eviction threshold |
 
 The `kubelet` will continue to report node status updates at the frequency specified by
 `--node-status-update-frequency` which defaults to `10s`.
@@ -212,20 +219,24 @@ reclaim the resource that has met its eviction threshold.
 Let's assume the operator started the `kubelet` with the following:
 
 ```
---eviction-hard="nodefs.available<1Gi,imagefs.available<10Gi"
---eviction-soft="nodefs.available<1.5Gi,imagefs.available<20Gi"
+--eviction-hard="nodefs.available<1Gi,nodefs.inodesFree<1,imagefs.available<10Gi,imagefs.inodesFree<10"
+--eviction-soft="nodefs.available<1.5Gi,nodefs.inodesFree<10,imagefs.available<20Gi,imagefs.inodesFree<100"
 --eviction-soft-grace-period="nodefs.available=1m,imagefs.available=2m"
 ```
 
 The `kubelet` will run a sync loop that looks at the available disk
 on the node's supported partitions as reported from `cAdvisor`.
-If available disk space on the node's primary filesystem is observed to drop below 1Gi,
+If available disk space on the node's primary filesystem is observed to drop below 1Gi
+or the free inodes on the node's primary filesystem is less than 1,
 the `kubelet` will immediately initiate eviction.
-If available disk space on the node's image filesystem is observed to drop below 10Gi,
+If available disk space on the node's image filesystem is observed to drop below 10Gi
+or the free inodes on the node's primary image filesystem is less than 10,
 the `kubelet` will immediately initiate eviction.
 
 If available disk space on the node's primary filesystem is observed as falling below `1.5Gi`,
+or if the free inodes on the node's primary filesystem is less than 10,
 or if available disk space on the node's image filesystem is observed as falling below `20Gi`,
+or if the free inodes on the node's image filesystem is less than 100,
 it will record when that signal was observed internally in a cache.  If at the next
 sync, that criterion was no longer satisfied, the cache is cleared for that
 signal.  If that signal is observed as being satisfied for longer than the
@@ -369,6 +380,7 @@ The default `minimum-eviction-threshold` is `0` for all resources.
 some of the existing features/flags around disk space retrieval will be deprecated in-favor of this proposal.
 
 | Existing Flag | New Flag | Rationale |
+| ------------- | -------- | --------- |
 | `--image-gc-high-threshold` | `--eviction-hard` or `eviction-soft` | existing eviction signals can capture image garbage collection |
 | `--image-gc-low-threshold` | `--minimum-eviction-thresholds` | eviction thresholds achieve the same behavior |
 | `--maximum-dead-containers` | | deprecated once old logs are stored outside of container's context |

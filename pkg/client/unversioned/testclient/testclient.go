@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -203,7 +203,7 @@ func (c *Fake) InvokesProxy(action Action) restclient.ResponseWrapper {
 // ClearActions clears the history of actions called on the fake client
 func (c *Fake) ClearActions() {
 	c.Lock()
-	c.Unlock()
+	defer c.Unlock()
 
 	c.actions = make([]Action, 0)
 }
@@ -285,6 +285,10 @@ func (c *Fake) Batch() client.BatchInterface {
 	return &FakeBatch{c}
 }
 
+func (c *Fake) Certificates() client.CertificatesInterface {
+	return &FakeCertificates{c}
+}
+
 func (c *Fake) Extensions() client.ExtensionsInterface {
 	return &FakeExperimental{c}
 }
@@ -299,6 +303,10 @@ func (c *Fake) ComponentStatuses() client.ComponentStatusInterface {
 
 func (c *Fake) ConfigMaps(namespace string) client.ConfigMapsInterface {
 	return &FakeConfigMaps{Fake: c, Namespace: namespace}
+}
+
+func (c *Fake) Rbac() client.RbacInterface {
+	return &FakeRbac{Fake: c}
 }
 
 // SwaggerSchema returns an empty swagger.ApiDeclaration for testing
@@ -384,6 +392,30 @@ func (c *FakeExperimental) ReplicaSets(namespace string) client.ReplicaSetInterf
 
 func (c *FakeExperimental) NetworkPolicies(namespace string) client.NetworkPolicyInterface {
 	return &FakeNetworkPolicies{Fake: c, Namespace: namespace}
+}
+
+func NewSimpleFakeRbac(objects ...runtime.Object) *FakeRbac {
+	return &FakeRbac{Fake: NewSimpleFake(objects...)}
+}
+
+type FakeRbac struct {
+	*Fake
+}
+
+func (c *FakeRbac) Roles(namespace string) client.RoleInterface {
+	return &FakeRoles{Fake: c, Namespace: namespace}
+}
+
+func (c *FakeRbac) RoleBindings(namespace string) client.RoleBindingInterface {
+	return &FakeRoleBindings{Fake: c, Namespace: namespace}
+}
+
+func (c *FakeRbac) ClusterRoles() client.ClusterRoleInterface {
+	return &FakeClusterRoles{Fake: c}
+}
+
+func (c *FakeRbac) ClusterRoleBindings() client.ClusterRoleBindingInterface {
+	return &FakeClusterRoleBindings{Fake: c}
 }
 
 type FakeDiscovery struct {

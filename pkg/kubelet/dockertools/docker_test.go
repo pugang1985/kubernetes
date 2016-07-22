@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import (
 	dockertypes "github.com/docker/engine-api/types"
 	dockernat "github.com/docker/go-connections/nat"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
-	"k8s.io/kubernetes/cmd/kubelet/app/options"
+	"github.com/stretchr/testify/assert"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/componentconfig"
 	"k8s.io/kubernetes/pkg/client/record"
@@ -44,9 +44,7 @@ import (
 )
 
 func verifyCalls(t *testing.T, fakeDocker *FakeDockerClient, calls []string) {
-	fakeDocker.Lock()
-	defer fakeDocker.Unlock()
-	verifyStringArrayEquals(t, fakeDocker.called, calls)
+	assert.New(t).NoError(fakeDocker.AssertCalls(calls))
 }
 
 func verifyStringArrayEquals(t *testing.T, actual, expected []string) {
@@ -651,9 +649,9 @@ func TestFindContainersByPod(t *testing.T) {
 		},
 	}
 	fakeClient := NewFakeDockerClient()
-	np, _ := network.InitNetworkPlugin([]network.NetworkPlugin{}, "", nettest.NewFakeHost(nil), componentconfig.HairpinNone)
+	np, _ := network.InitNetworkPlugin([]network.NetworkPlugin{}, "", nettest.NewFakeHost(nil), componentconfig.HairpinNone, "10.0.0.0/8")
 	// image back-off is set to nil, this test should not pull images
-	containerManager := NewFakeDockerManager(fakeClient, &record.FakeRecorder{}, nil, nil, &cadvisorapi.MachineInfo{}, options.GetDefaultPodInfraContainerImage(), 0, 0, "", &containertest.FakeOS{}, np, nil, nil, nil)
+	containerManager := NewFakeDockerManager(fakeClient, &record.FakeRecorder{}, nil, nil, &cadvisorapi.MachineInfo{}, "", 0, 0, "", &containertest.FakeOS{}, np, nil, nil, nil)
 	for i, test := range tests {
 		fakeClient.RunningContainerList = test.runningContainerList
 		fakeClient.ExitedContainerList = test.exitedContainerList

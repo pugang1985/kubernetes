@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package factory
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +48,8 @@ import (
 
 const (
 	SchedulerAnnotationKey = "scheduler.alpha.kubernetes.io/name"
+	initialGetBackoff      = 100 * time.Millisecond
+	maximalGetBackoff      = time.Minute
 )
 
 // ConfigFactory knows how to fill out a scheduler config with its support functions.
@@ -317,9 +318,7 @@ func (f *ConfigFactory) CreateFromKeys(predicateKeys, priorityKeys sets.String, 
 
 	f.Run()
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	algo := scheduler.NewGenericScheduler(f.schedulerCache, predicateFuncs, priorityConfigs, extenders, r)
+	algo := scheduler.NewGenericScheduler(f.schedulerCache, predicateFuncs, priorityConfigs, extenders)
 
 	podBackoff := podBackoff{
 		perPodBackoff: map[types.NamespacedName]*backoffEntry{},
@@ -418,7 +417,7 @@ func (f *ConfigFactory) Run() {
 
 func (f *ConfigFactory) getNextPod() *api.Pod {
 	for {
-		pod := f.PodQueue.Pop().(*api.Pod)
+		pod := cache.Pop(f.PodQueue).(*api.Pod)
 		if f.responsibleForPod(pod) {
 			glog.V(4).Infof("About to try and schedule pod %v", pod.Name)
 			return pod
@@ -435,17 +434,28 @@ func (f *ConfigFactory) responsibleForPod(pod *api.Pod) bool {
 }
 
 func getNodeConditionPredicate() cache.NodeConditionPredicate {
-	return func(node api.Node) bool {
-		for _, cond := range node.Status.Conditions {
-			// We consider the node for scheduling only when its NodeReady condition status
-			// is ConditionTrue and its NodeOutOfDisk condition status is ConditionFalse.
+	return func(node *api.Node) bool {
+		for i := range node.Status.Conditions {
+			cond := &node.Status.Conditions[i]
+			// We consider the node for scheduling only when its:
+			// - NodeReady condition status is ConditionTrue,
+			// - NodeOutOfDisk condition status is ConditionFalse,
+			// - NodeNetworkUnavailable condition status is ConditionFalse.
 			if cond.Type == api.NodeReady && cond.Status != api.ConditionTrue {
 				glog.V(4).Infof("Ignoring node %v with %v condition status %v", node.Name, cond.Type, cond.Status)
 				return false
 			} else if cond.Type == api.NodeOutOfDisk && cond.Status != api.ConditionFalse {
 				glog.V(4).Infof("Ignoring node %v with %v condition status %v", node.Name, cond.Type, cond.Status)
 				return false
+			} else if cond.Type == api.NodeNetworkUnavailable && cond.Status != api.ConditionFalse {
+				glog.V(4).Infof("Ignoring node %v with %v condition status %v", node.Name, cond.Type, cond.Status)
+				return false
 			}
+		}
+		// Ignore nodes that are marked unschedulable
+		if node.Spec.Unschedulable {
+			glog.V(4).Infof("Ignoring node %v since it is unschedulable", node.Name)
+			return false
 		}
 		return true
 	}
@@ -468,9 +478,10 @@ func (factory *ConfigFactory) createAssignedNonTerminatedPodLW() *cache.ListWatc
 
 // createNodeLW returns a cache.ListWatch that gets all changes to nodes.
 func (factory *ConfigFactory) createNodeLW() *cache.ListWatch {
-	// TODO: Filter out nodes that doesn't have NodeReady condition.
-	fields := fields.Set{api.NodeUnschedulableField: "false"}.AsSelector()
-	return cache.NewListWatchFromClient(factory.Client, "nodes", api.NamespaceAll, fields)
+	// all nodes are considered to ensure that the scheduler cache has access to all nodes for lookups
+	// the NodeCondition is used to filter out the nodes that are not ready or unschedulable
+	// the filtered list is used as the super set of nodes to consider for scheduling
+	return cache.NewListWatchFromClient(factory.Client, "nodes", api.NamespaceAll, fields.ParseSelectorOrDie(""))
 }
 
 // createPersistentVolumeLW returns a cache.ListWatch that gets all changes to persistentVolumes.
@@ -522,12 +533,20 @@ func (factory *ConfigFactory) makeDefaultErrorFunc(backoff *podBackoff, podQueue
 			}
 			// Get the pod again; it may have changed/been scheduled already.
 			pod = &api.Pod{}
-			err := factory.Client.Get().Namespace(podID.Namespace).Resource("pods").Name(podID.Name).Do().Into(pod)
-			if err != nil {
-				if !errors.IsNotFound(err) {
-					glog.Errorf("Error getting pod %v for retry: %v; abandoning", podID, err)
+			getBackoff := initialGetBackoff
+			for {
+				if err := factory.Client.Get().Namespace(podID.Namespace).Resource("pods").Name(podID.Name).Do().Into(pod); err == nil {
+					break
 				}
-				return
+				if errors.IsNotFound(err) {
+					glog.Warningf("A pod %v no longer exists", podID)
+					return
+				}
+				glog.Errorf("Error getting pod %v for retry: %v; retrying...", podID, err)
+				if getBackoff = getBackoff * 2; getBackoff > maximalGetBackoff {
+					getBackoff = maximalGetBackoff
+				}
+				time.Sleep(getBackoff)
 			}
 			if pod.Spec.NodeName == "" {
 				podQueue.AddIfNotPresent(pod)

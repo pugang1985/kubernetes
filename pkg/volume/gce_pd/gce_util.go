@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,7 +43,12 @@ const (
 	maxChecks            = 60
 	maxRetries           = 10
 	checkSleepDuration   = time.Second
-	errorSleepDuration   = 5 * time.Second
+)
+
+// These variables are modified only in unit tests and should be constant
+// otherwise.
+var (
+	errorSleepDuration time.Duration = 5 * time.Second
 )
 
 type GCEDiskUtil struct{}
@@ -77,20 +82,22 @@ func (gceutil *GCEDiskUtil) CreateVolume(c *gcePersistentDiskProvisioner) (strin
 
 	// The disk will be created in the zone in which this code is currently running
 	// TODO: We should support auto-provisioning volumes in multiple/specified zones
-	zone, err := cloud.GetZone()
+	zones, err := cloud.GetAllZones()
 	if err != nil {
 		glog.V(2).Infof("error getting zone information from GCE: %v", err)
 		return "", 0, nil, err
 	}
 
-	err = cloud.CreateDisk(name, zone.FailureDomain, int64(requestGB), *c.options.CloudTags)
+	zone := volume.ChooseZoneForVolume(zones, c.options.PVCName)
+
+	err = cloud.CreateDisk(name, zone, int64(requestGB), *c.options.CloudTags)
 	if err != nil {
 		glog.V(2).Infof("Error creating GCE PD volume: %v", err)
 		return "", 0, nil, err
 	}
 	glog.V(2).Infof("Successfully created GCE PD volume %s", name)
 
-	labels, err := cloud.GetAutoLabelsForPD(name)
+	labels, err := cloud.GetAutoLabelsForPD(name, zone)
 	if err != nil {
 		// We don't really want to leak the volume here...
 		glog.Errorf("error getting labels for volume %q: %v", name, err)
@@ -118,7 +125,14 @@ func verifyDevicePath(devicePaths []string, sdBeforeSet sets.String) (string, er
 }
 
 // Unmount the global PD mount, which should be the only one, and delete it.
+// Does nothing if globalMountPath does not exist.
 func unmountPDAndRemoveGlobalPath(globalMountPath string, mounter mount.Interface) error {
+	if pathExists, pathErr := pathExists(globalMountPath); pathErr != nil {
+		return fmt.Errorf("Error checking if path exists: %v", pathErr)
+	} else if !pathExists {
+		glog.V(5).Infof("Warning: Unmount skipped because path does not exist: %v", globalMountPath)
+		return nil
+	}
 	err := mounter.Unmount(globalMountPath)
 	os.Remove(globalMountPath)
 	return err

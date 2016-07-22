@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors All rights reserved.
+Copyright 2015 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -51,6 +51,14 @@ func (v *mockVolumes) DeleteDisk(volumeName string) (bool, error) {
 
 func (v *mockVolumes) GetVolumeLabels(volumeName string) (map[string]string, error) {
 	return v.volumeLabels, v.volumeLabelsError
+}
+
+func (c *mockVolumes) GetDiskPath(volumeName string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
+func (c *mockVolumes) DiskIsAttached(volumeName, instanceID string) (bool, error) {
+	return false, fmt.Errorf("not implemented")
 }
 
 func mockVolumeFailure(err error) *mockVolumes {

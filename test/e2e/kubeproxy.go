@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors All rights reserved.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -463,6 +463,7 @@ func (config *KubeProxyTestConfig) setup() {
 	}
 
 	By("Getting node addresses")
+	framework.ExpectNoError(framework.WaitForAllNodesSchedulable(config.f.Client))
 	nodeList := framework.GetReadySchedulableNodesOrDie(config.f.Client)
 	config.externalAddrs = framework.NodeAddresses(nodeList, api.NodeExternalIP)
 	if len(config.externalAddrs) < 2 {
@@ -501,6 +502,7 @@ func (config *KubeProxyTestConfig) cleanup() {
 }
 
 func (config *KubeProxyTestConfig) createNetProxyPods(podName string, selector map[string]string) []*api.Pod {
+	framework.ExpectNoError(framework.WaitForAllNodesSchedulable(config.f.Client))
 	nodes := framework.GetReadySchedulableNodesOrDie(config.f.Client)
 
 	// create pods, one for each node

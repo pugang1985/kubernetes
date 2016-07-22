@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2016 The Kubernetes Authors All rights reserved.
+# Copyright 2016 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -139,14 +139,28 @@ function install-kube-binary-config {
   if [[ "${TEST_CLUSTER:-}" == "true" ]] || \
      [[ "${builtin_version}" != "${required_version}" ]]; then
     cp "${src_dir}/kubectl" "${kube_bin}"
-    chmod 544 "${kube_bin}/kubelet"
-    chmod 544 "${kube_bin}/kubectl"
+    chmod 755 "${kube_bin}/kubelet"
+    chmod 755 "${kube_bin}/kubectl"
     mount --bind "${kube_bin}/kubelet" /usr/bin/kubelet
     mount --bind "${kube_bin}/kubectl" /usr/bin/kubectl
   else
     rm -f "${kube_bin}/kubelet"
   fi
+  if [[ "${NETWORK_PROVIDER:-}" == "kubenet" ]] || \
+     [[ "${NETWORK_PROVIDER:-}" == "cni" ]]; then
+    #TODO(andyzheng0831): We should make the cni version number as a k8s env variable.
+    local -r cni_tar="cni-8a936732094c0941e1543ef5d292a1f4fffa1ac5.tar.gz"
+    download-or-bust "" "https://storage.googleapis.com/kubernetes-release/network-plugins/${cni_tar}"
+    tar xzf "${KUBE_HOME}/${cni_tar}" -C "${kube_bin}" --overwrite
+    mv "${kube_bin}/bin"/* "${kube_bin}"
+    rmdir "${kube_bin}/bin"
+    rm -f "${KUBE_HOME}/${cni_tar}"
+  fi
+
   cp "${KUBE_HOME}/kubernetes/LICENSES" "${KUBE_HOME}"
+  cp "${KUBE_HOME}/kubernetes/kubernetes-src.tar.gz" "${KUBE_HOME}"
+  chmod a+r "${KUBE_HOME}/kubernetes/LICENSES"
+  chmod a+r "${KUBE_HOME}/kubernetes/kubernetes-src.tar.gz"
 
   # Put kube-system pods manifests in ${KUBE_HOME}/kube-manifests/.
   dst_dir="${KUBE_HOME}/kube-manifests"
@@ -165,9 +179,9 @@ function install-kube-binary-config {
   tar xzf "${KUBE_HOME}/${manifests_tar}" -C "${dst_dir}" --overwrite
   local -r kube_addon_registry="${KUBE_ADDON_REGISTRY:-gcr.io/google_containers}"
   if [[ "${kube_addon_registry}" != "gcr.io/google_containers" ]]; then
-    find "${dst_dir}" -maxdepth 1 -name \*.yaml -or -name \*.yaml.in | \
+    find "${dst_dir}" -name \*.yaml -or -name \*.yaml.in | \
       xargs sed -ri "s@(image:\s.*)gcr.io/google_containers@\1${kube_addon_registry}@"
-    find "${dst_dir}" -maxdepth 1 -name \*.manifest -or -name \*.json | \
+    find "${dst_dir}" -name \*.manifest -or -name \*.json | \
       xargs sed -ri "s@(image\":\s+\")gcr.io/google_containers@\1${kube_addon_registry}@"
   fi
   cp "${dst_dir}/kubernetes/gci-trusty/gci-configure-helper.sh" "${KUBE_HOME}/bin/configure-helper.sh"
